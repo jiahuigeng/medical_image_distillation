@@ -45,19 +45,6 @@ class H5Dataset(Dataset):
 
         return (image, label)
 
-train_transforms = transforms.Compose([
-    transforms.ToPILImage(),
-    transforms.RandomVerticalFlip(),
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-])
-
-test_transforms = transforms.Compose([
-    transforms.ToPILImage(),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-])
 
 def get_dataset(dataset, data_path):
     if dataset == 'MNIST':
@@ -95,11 +82,30 @@ def get_dataset(dataset, data_path):
         class_names = [str(c) for c in range(num_classes)]
 
     elif dataset == "PCAM":
-        channel = 1
-        im_size = (128, 128)
+        channel = 3
+        im_size = (96, 96)
         num_classes = 2
-        mean = []
-        std = []
+
+        train_transforms = transforms.Compose([
+            # transforms.ToPILImage(),
+            transforms.RandomVerticalFlip(),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+        test_transforms = transforms.Compose([
+            # transforms.ToPILImage(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+        mean = [0.5071, 0.4866, 0.4409]
+        std = [0.2673, 0.2564, 0.2762]
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
+        dst_train = datasets.PCAM(data_path, split='train', download=True, transform =train_transforms)
+        dst_test = datasets.PCAM(data_path, split='test', download=True, transform =test_transforms)
+        print(dst_train[0])
+        class_names = []
 
 
     elif dataset == 'CIFAR10':

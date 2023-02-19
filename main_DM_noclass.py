@@ -12,14 +12,14 @@ from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_s
 def main():
 
     parser = argparse.ArgumentParser(description='Parameter Processing')
-    parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset')
+    parser.add_argument('--dataset', type=str, default='PCAM', help='dataset')
     parser.add_argument('--model', type=str, default='ConvNet', help='model')
-    parser.add_argument('--ipc', type=int, default=10, help='image(s) per class')
+    parser.add_argument('--ipc', type=int, default=50, help='image(s) per class')
     parser.add_argument('--eval_mode', type=str, default='SS', help='eval_mode') # S: the same to training model, M: multi architectures,  W: net width, D: net depth, A: activation function, P: pooling layer, N: normalization layer,
-    parser.add_argument('--num_exp', type=int, default=1, help='the number of experiments')
+    parser.add_argument('--num_exp', type=int, default=5, help='the number of experiments')
     parser.add_argument('--num_eval', type=int, default=20, help='the number of evaluating randomly initialized models')
     parser.add_argument('--epoch_eval_train', type=int, default=1000, help='epochs to train a model with synthetic data') # it can be small for speeding up with little performance drop
-    parser.add_argument('--Iteration', type=int, default=5000, help='training iterations')
+    parser.add_argument('--Iteration', type=int, default=20000, help='training iterations')
     parser.add_argument('--lr_img', type=float, default=1.0, help='learning rate for updating synthetic images')
     parser.add_argument('--lr_net', type=float, default=0.01, help='learning rate for updating network parameters')
     parser.add_argument('--batch_real', type=int, default=256, help='batch size for real data')
@@ -70,8 +70,8 @@ def main():
         labels_all = [dst_train[i][1] for i in range(len(dst_train))]
         for i, lab in enumerate(labels_all):
             indices_class[lab].append(i)
-        # images_all = torch.cat(images_all, dim=0).to(args.device)
-        # labels_all = torch.tensor(labels_all, dtype=torch.long, device=args.device)
+        images_all = torch.cat(images_all, dim=0).to(args.device)
+        labels_all = torch.tensor(labels_all, dtype=torch.long, device=args.device)
 
 
 
@@ -80,11 +80,10 @@ def main():
 
         def get_images(c, n): # get random n images from class c
             idx_shuffle = np.random.permutation(indices_class[c])[:n]
-            return torch.cat([images_all[i] for i in idx_shuffle], dim=0).to(args.device)
-            # return torch.cat(images_all[idx_shuffle], dim=0).to(args.device)
+            return images_all[idx_shuffle]
 
-        # for ch in range(channel):
-        #     print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
+        for ch in range(channel):
+            print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
 
 
         ''' initialize the synthetic data '''
