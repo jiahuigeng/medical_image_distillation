@@ -4,10 +4,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.data as data_utils
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 from scipy.ndimage.interpolation import rotate as scipyrotate
-from networks import MLP, ConvNet, LeNet, AlexNet, AlexNetBN, VGG11, VGG11BN, ResNet18, ResNet18BN_AP, ResNet18BN
+from networks import MLP, ConvNet, LeNet, AlexNet, AlexNetBN, VGG11, VGG11BN, ResNet18, ResNet18BN_AP, ResNet18BN, Attention
 
 class H5Dataset(Dataset):
     def __init__(self, path, transform=None):
@@ -44,6 +45,159 @@ class H5Dataset(Dataset):
             image = self.transform(image)
 
         return (image, label)
+
+class MILDataset(data_utils.Dataset):
+    def __init__(self, dataset="MNIST", target_number=9, mean_bag_length=10, var_bag_length=2, num_bag=250, seed=1, train=True):
+        self.dataset = dataset
+        self.target_number = target_number
+        self.mean_bag_length = mean_bag_length
+        self.var_bag_length = var_bag_length
+        self.num_bag = num_bag
+        self.train = train
+
+        self.r = np.random.RandomState(seed)
+
+        if self.dataset == "MNIST":
+            self.num_in_train = 60000
+            self.num_in_test = 10000
+        elif self.dataset == "CIFAR10":
+            self.num_in_train = 50000
+            self.num_in_test = 10000
+
+        if self.train:
+            self.train_bags_list, self.train_labels_list = self._create_bags()
+        else:
+            self.test_bags_list, self.test_labels_list = self._create_bags()
+
+    def _create_bags(self):
+        if self.train:
+            if self.dataset == "MNIST":
+                loader = data_utils.DataLoader(datasets.MNIST('data',
+                                                              train=True,
+                                                              download=True,
+                                                              transform=transforms.Compose([
+                                                                  transforms.ToTensor(),
+                                                                  transforms.Normalize((0.1307,), (0.3081,))])),
+                                               batch_size=self.num_in_train,
+                                               shuffle=False)
+
+            elif self.dataset == "CIFAR10":
+                mean = [0.4914, 0.4822, 0.4465]
+                std = [0.2023, 0.1994, 0.2010]
+                transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
+                loader = data_utils.DataLoader(datasets.CIFAR10('data',
+                                                              train=True,
+                                                              download=True,
+                                                              transform=transform),
+                                               batch_size=self.num_in_train,
+                                               shuffle=False)
+        else:
+            if self.dataset == "MNIST":
+                loader = data_utils.DataLoader(datasets.MNIST('data',
+                                                              train=False,
+                                                              download=True,
+                                                              transform=transforms.Compose([
+                                                                  transforms.ToTensor(),
+                                                                  transforms.Normalize((0.1307,), (0.3081,))])),
+                                               batch_size=self.num_in_test,
+                                               shuffle=False)
+            elif self.dataset == "CIFAR10":
+                mean = [0.4914, 0.4822, 0.4465]
+                std = [0.2023, 0.1994, 0.2010]
+                transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
+                loader = data_utils.DataLoader(datasets.CIFAR10('data',
+                                                              train=False,
+                                                              download=True,
+                                                              transform=transform),
+                                               batch_size=self.num_in_test,
+                                               shuffle=False)
+
+        for (batch_data, batch_labels) in loader:
+            all_imgs = batch_data
+            all_labels = batch_labels
+
+        bags_list = []
+        labels_list = []
+
+        for i in range(self.num_bag):
+            bag_length = np.int(self.r.normal(self.mean_bag_length, self.var_bag_length, 1))
+            if bag_length < 1:
+                bag_length = 1
+
+            if self.train:
+                indices = torch.LongTensor(self.r.randint(0, self.num_in_train, bag_length))
+            else:
+                indices = torch.LongTensor(self.r.randint(0, self.num_in_test, bag_length))
+
+            labels_in_bag = all_labels[indices]
+            labels_in_bag = labels_in_bag == self.target_number
+
+            bags_list.append(all_imgs[indices])
+            labels_list.append(labels_in_bag)
+
+        return bags_list, labels_list
+
+    def __len__(self):
+        if self.train:
+            return len(self.train_labels_list)
+        else:
+            return len(self.test_labels_list)
+
+    def __getitem__(self, index):
+        if self.train:
+            bag = self.train_bags_list[index]
+            label = [max(self.train_labels_list[index]), self.train_labels_list[index]]
+        else:
+            bag = self.test_bags_list[index]
+            label = [max(self.test_labels_list[index]), self.test_labels_list[index]]
+
+        return bag, label
+
+def get_mil_dataset(args):
+    dst_train = MILDataset(dataset=args.dataset, target_number=args.target_number,  mean_bag_length=args.mean_bag_length,
+                           var_bag_length=args.var_bag_length, num_bag=args.num_bags_train, seed=args.seed,
+                           train=True)
+
+    if args.distill_mode == "bag":
+        dst_test = MILDataset(dataset=args.dataset, target_number=args.target_number, mean_bag_length=args.mean_bag_length,
+                              var_bag_length=args.var_bag_length, num_bag=args.num_bags_test,seed=args.seed,
+                              train=False)
+
+    if args.dataset == "MNIST":
+        channel = 1
+        im_size = (28, 28)
+        num_classes = 2
+        mean = [0.1307]
+        std = [0.3081]
+        class_names = ['True', 'False']
+
+        if args.distill_mode == "instance":
+            transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
+            dst_test = datasets.MNIST("data", train=False, download=True, transform=transform)
+            dst_test.targets = (dst_test.targets == args.target_number)
+
+
+    elif args.dataset == "CIFAR10":
+        channel = 3
+        im_size = (32, 32)
+        num_classes = 2
+        mean = [0.4914, 0.4822, 0.4465]
+        std = [0.2023, 0.1994, 0.2010]
+        class_names = ['True', 'False']
+
+        if args.distill_mode == "instance":
+            transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
+            dst_test = datasets.FashionMNIST("data", train=False, download=True, transform=transform)
+            dst_test.targets = (dst_test.targets == args.target_number)
+
+    testloader = torch.utils.data.DataLoader(dst_test, batch_size=1, shuffle=False, num_workers=0)
+    return channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader
+
+
+
+
+
+
 
 
 def get_dataset(dataset, data_path):
@@ -190,7 +344,9 @@ def get_network(model, channel, num_classes, im_size=(32, 32)):
     torch.random.manual_seed(int(time.time() * 1000) % 100000)
     net_width, net_depth, net_act, net_norm, net_pooling = get_default_convnet_setting()
 
-    if model == 'MLP':
+    if model == "Attention":
+        net = Attention()
+    elif model == 'MLP':
         net = MLP(channel=channel, num_classes=num_classes)
     elif model == 'ConvNet':
         net = ConvNet(channel=channel, num_classes=num_classes, net_width=net_width, net_depth=net_depth, net_act=net_act, net_norm=net_norm, net_pooling=net_pooling, im_size=im_size)
@@ -272,6 +428,31 @@ def get_network(model, channel, num_classes, im_size=(32, 32)):
     net = net.to(device)
 
     return net
+
+def get_mil_network(model, channel, num_classes, im_size=(32, 32)):
+    '''
+    :param model:
+    :param channel:
+    :param num_classes:
+    :param im_size:
+    :return:
+    '''
+    torch.random.manual_seed(int(time.time() * 1000) % 100000)
+    net_width, net_depth, net_act, net_norm, net_pooling = get_default_convnet_setting()
+
+    net = Attention()
+
+    gpu_num = torch.cuda.device_count()
+    if gpu_num>0:
+        device = 'cuda'
+        if gpu_num>1:
+            net = nn.DataParallel(net)
+    else:
+        device = 'cpu'
+    net = net.to(device)
+
+    return net
+
 
 
 
@@ -370,6 +551,7 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
         net.eval()
 
     for i_batch, datum in enumerate(dataloader):
+        # print("i_batch", i_batch)
         img = datum[0].float().to(args.device)
         if aug:
             if args.dsa:
@@ -414,7 +596,8 @@ def evaluate_synset(it_eval, net, images_train, labels_train, testloader, args):
 
     start = time.time()
     for ep in range(Epoch+1):
-        loss_train, acc_train = epoch('train', trainloader, net, optimizer, criterion, args, aug = True)
+        # print("epoch:", ep)
+        loss_train, acc_train = epoch('train', trainloader, net, optimizer, criterion, args, aug = False) # TODO: change aug to False
         if ep in lr_schedule:
             lr *= 0.1
             optimizer = torch.optim.SGD(net.parameters(), lr=lr, momentum=0.9, weight_decay=0.0005)

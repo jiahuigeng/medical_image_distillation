@@ -32,6 +32,7 @@ class MLP(nn.Module):
 
 
 
+
 ''' ConvNet '''
 class ConvNet(nn.Module):
     def __init__(self, channel, num_classes, net_width, net_depth, net_act, net_norm, net_pooling, im_size = (32,32)):
@@ -43,7 +44,7 @@ class ConvNet(nn.Module):
 
     def forward(self, x):
         out = self.features(x)
-        out = out.view(out.size(0), -1)
+        out = out.reshape(out.size(0), -1)
         out = self.classifier(out)
         return out
 
@@ -495,3 +496,105 @@ def ResNet101(channel, num_classes):
 def ResNet152(channel, num_classes):
     return ResNet(Bottleneck, [3,8,36,3], channel=channel, num_classes=num_classes)
 
+'''Attention Net'''
+class Attention(nn.Module):
+    def __init__(self):
+        super(Attention, self).__init__()
+        self.L = 500
+        self.D = 128
+        self.K = 1
+
+        self.feature_extractor_part1 = nn.Sequential(
+            nn.Conv2d(1, 20, kernel_size=5),
+            nn.ReLU(),
+            nn.MaxPool2d(2, stride=2),
+            nn.Conv2d(20, 50, kernel_size=5),
+            nn.ReLU(),
+            nn.MaxPool2d(2, stride=2)
+        )
+
+        self.feature_extractor_part2 = nn.Sequential(
+            nn.Linear(50 * 4 * 4, self.L),
+            nn.ReLU(),
+        )
+
+        self.attention = nn.Sequential(
+            nn.Linear(self.L, self.D),
+            nn.Tanh(),
+            nn.Linear(self.D, self.K)
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Linear(self.L*self.K, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        x = x.squeeze(0)
+
+        H = self.feature_extractor_part1(x)
+        # 13 50 4 4
+        H = H.view(-1, 50 * 4 * 4)
+
+        H = self.feature_extractor_part2(H)  # NxL
+        # 13 500
+        A = self.attention(H)  # NxK
+
+        A = torch.transpose(A, 1, 0)  # KxN
+
+        A = F.softmax(A, dim=1)  # softmax over N
+
+        M = torch.mm(A, H)  # KxL
+        #  1 * 500
+        Y_prob = self.classifier(M)
+
+        Y_hat = torch.ge(Y_prob, 0.5).float()
+
+        return Y_prob, Y_hat, A
+
+    def embed(self, x):
+        x = x.squeeze(0)
+
+        H = self.feature_extractor_part1(x)
+        # 13 50 4 4
+        H = H.view(-1, 50 * 4 * 4)
+
+        H = self.feature_extractor_part2(H)  # NxL
+        # 13 500
+        A = self.attention(H)  # NxK
+
+        A = torch.transpose(A, 1, 0)  # KxN
+
+        A = F.softmax(A, dim=1)  # softmax over N
+
+        M = torch.mm(A, H)  # KxL
+
+        return M
+
+    # AUXILIARY METHODS
+    def calculate_classification_error(self, X, Y):
+        Y = Y.float()
+        _, Y_hat, _ = self.forward(X)
+        error = 1. - Y_hat.eq(Y).cpu().float().mean().data.item()
+
+        return error, Y_hat
+
+    def calculate_objective(self, X, Y):
+        Y = Y.float()
+        Y_prob, _, A = self.forward(X)
+        Y_prob = torch.clamp(Y_prob, min=1e-5, max=1. - 1e-5)
+        neg_log_likelihood = -1. * (Y * torch.log(Y_prob) + (1. - Y) * torch.log(1. - Y_prob))  # negative log bernoulli
+
+        return neg_log_likelihood, A
+
+class AttentionMIL(nn.Module):
+    def __init__(self):
+        super(AttentionMIL, self).__init__()
+        pass
+
+    def forward(self):
+        pass
+
+
+if __name__ == "__main__":
+    pass
