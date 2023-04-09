@@ -530,14 +530,18 @@ class Attention(nn.Module):
         )
 
     def forward(self, x):
+        if len(x.shape) == 5:
+            origin_size = x.size()
+            x = x.view([-1]+origin_size[2:])
+
         x = x.squeeze(0)
 
         H = self.feature_extractor_part1(x)
-        # 13 50 4 4
+        # 1 50 4 4
         H = H.view(-1, 50 * 4 * 4)
 
         H = self.feature_extractor_part2(H)  # NxL
-        # 13 500
+        # 10 500
         A = self.attention(H)  # NxK
 
         A = torch.transpose(A, 1, 0)  # KxN
@@ -553,22 +557,30 @@ class Attention(nn.Module):
         return Y_prob, Y_hat, A
 
     def embed(self, x):
+        origin_shape = list(x.size())
+        batch_size = origin_shape[0]
+        if len(x.shape) == 5:
+            # origin_size = list(x.size())
+            x = x.view([-1]+origin_shape[2:])
+
         x = x.squeeze(0)
 
         H = self.feature_extractor_part1(x)
         # 13 50 4 4
-        H = H.view(-1, 50 * 4 * 4)
+        H = H.view(batch_size, -1, 50 * 4 * 4)
 
         H = self.feature_extractor_part2(H)  # NxL
         # 13 500
         A = self.attention(H)  # NxK
-
-        A = torch.transpose(A, 1, 0)  # KxN
+        if batch_size > 1:
+            A = A.view(batch_size, 1, -1)
+        else:
+            A = torch.transpose(A, 1, 0)  # KxN
 
         A = F.softmax(A, dim=1)  # softmax over N
 
-        M = torch.mm(A, H)  # KxL
-
+        # M = torch.mm(A, H)  # KxL
+        M = torch.matmul(A, H)
         return M
 
     # AUXILIARY METHODS

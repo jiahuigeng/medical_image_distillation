@@ -47,7 +47,7 @@ class H5Dataset(Dataset):
         return (image, label)
 
 class MILDataset(data_utils.Dataset):
-    def __init__(self, dataset="MNIST", target_number=9, mean_bag_length=10, var_bag_length=2, num_bag=250, seed=1, train=True):
+    def __init__(self, dataset="MNIST", target_number=9, mean_bag_length=10, var_bag_length=0, num_bag=250, seed=1, train=True):
         self.dataset = dataset
         self.target_number = target_number
         self.mean_bag_length = mean_bag_length
@@ -562,6 +562,8 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
         n_b = lab.shape[0]
 
         output = net(img)
+        # if isinstance(output, tuple):
+        #     output = output[0]
         loss = criterion(output, lab)
         acc = np.sum(np.equal(np.argmax(output.cpu().data.numpy(), axis=-1), lab.cpu().data.numpy()))
 
@@ -896,4 +898,19 @@ AUGMENT_FNS = {
     'scale': [rand_scale],
     'rotate': [rand_rotate],
 }
+
+if __name__ == "__main__":
+    trainset = MILDataset(target_number=9,
+                          mean_bag_length=10,
+                          var_bag_length=0,
+                          num_bag=100,
+                          seed=1,
+                          train=True)
+
+    train_loader = data_utils.DataLoader(trainset,
+                                         batch_size=3,
+                                         shuffle=True)
+
+    for batch_idx, (batch_bag, batch_label) in enumerate(train_loader):
+        print(batch_bag, batch_label)
 

@@ -1,6 +1,7 @@
-import os
-import time
+import os, sys
+import time, datetime
 import copy
+import logging
 import argparse
 import numpy as np
 import torch
@@ -18,14 +19,14 @@ def main():
     parser.add_argument('--ipc', type=int, default=10, help='image(s) per class')
     parser.add_argument('--eval_mode', type=str, default='SS', help='eval_mode') # S: the same to training model, M: multi architectures,  W: net width, D: net depth, A: activation function, P: pooling layer, N: normalization layer,
     parser.add_argument('--num_exp', type=int, default=1, help='the number of experiments')
-    parser.add_argument('--num_eval', type=int, default=1, help='the number of evaluating randomly initialized models')
+    parser.add_argument('--num_eval', type=int, default=3, help='the number of evaluating randomly initialized models')
     parser.add_argument('--epoch_eval_train', type=int, default=1000, help='epochs to train a model with synthetic data') # it can be small for speeding up with little performance drop
     parser.add_argument('--Iteration', type=int, default=6000, help='training iterations')
     parser.add_argument('--lr_img', type=float, default=1.0, help='learning rate for updating synthetic images')
     parser.add_argument('--lr_net', type=float, default=0.01, help='learning rate for updating network parameters')
     # TODO: change batch_real to 1
-    parser.add_argument('--batch_real', type=int, default=1, help='batch size for real data')
-    parser.add_argument('--batch_train', type=int, default=1, help='batch size for training networks')
+    parser.add_argument('--batch_real', type=int, default=4, help='batch size for real data')
+    parser.add_argument('--batch_train', type=int, default=4, help='batch size for training networks')
     parser.add_argument('--init', type=str, default='noise', help='noise/real: initialize synthetic images from random noise or randomly sampled real images.')
     parser.add_argument('--dsa_strategy', type=str, default='none', choices=['color_crop_cutout_flip_scale_rotate', 'none'], help='differentiable Siamese augmentation strategy')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
@@ -38,7 +39,7 @@ def main():
                         help='bags have a positive labels if they contain at least one 9')
     parser.add_argument('--mean_bag_length', type=int, default=10, metavar='ML',
                         help='average bag length')
-    parser.add_argument('--var_bag_length', type=int, default=2, metavar='VL',
+    parser.add_argument('--var_bag_length', type=int, default=0, metavar='VL',
                         help='variance of bag length')
     parser.add_argument('--num_bags_train', type=int, default=200, metavar='NTrain',
                         help='number of bags in training set')
@@ -61,8 +62,27 @@ def main():
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
 
+    save_path = os.path.join(args.save_path, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+    if not os.path.exists(save_path):
+        os.mkdir(save_path)
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(logging.DEBUG)
+    stdout_handler.setFormatter(formatter)
+
+    file_handler = logging.FileHandler(os.path.join(save_path, 'logs.log'))
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(stdout_handler)
+
     eval_it_pool = np.arange(0, args.Iteration+1, 2000).tolist() if args.eval_mode == 'S' or args.eval_mode == 'SS' else [args.Iteration] # The list of iterations when we evaluate models and record results.
-    print('eval_it_pool: ', eval_it_pool)
+    logger.info(f'eval_it_pool: {eval_it_pool}')
 
 
     # channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path)
@@ -79,9 +99,13 @@ def main():
 
 
     for exp in range(args.num_exp):
-        print('\n================== Exp %d ==================\n '%exp)
-        print('Hyper-parameters: \n', args.__dict__)
-        print('Evaluation model pool: ', model_eval_pool)
+        # print('\n================== Exp %d ==================\n '%exp)
+        # print('Hyper-parameters: \n', args.__dict__)
+        # print('Evaluation model pool: ', model_eval_pool)
+
+        logger.info('\n================== Exp %d ==================\n '%exp)
+        logger.info(f'Hyper-parameters: {args.__dict__}\n')
+        logger.info(f'Evaluation model pool: {model_eval_pool}')
 
         ''' organize the real dataset '''
         images_all = []
@@ -99,7 +123,7 @@ def main():
 
 
         for c in range(num_classes):
-            print('class c = %d: %d real images'%(c, len(indices_class[c])))
+            logger.info('class c = %d: %d real images'%(c, len(indices_class[c])))
 
         def get_images(c, n): # get random n images from class c
             idx_shuffle = np.random.permutation(indices_class[c])[:n]
@@ -115,27 +139,27 @@ def main():
         label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
 
         if args.init == 'real':
-            print('initialize synthetic data from random real images')
+            logger.info('initialize synthetic data from random real images')
             for c in range(num_classes):
                 image_syn.data[c*args.ipc:(c+1)*args.ipc] = get_images(c, args.ipc).detach().data
         else:
-            print('initialize synthetic data from random noise')
+            logger.info('initialize synthetic data from random noise')
 
 
         ''' training '''
         optimizer_img = torch.optim.SGD([image_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
         optimizer_img.zero_grad()
-        print('%s training begins'%get_time())
+        logger.info('%s training begins'%get_time())
 
         for it in range(args.Iteration+1):
 
             ''' Evaluate synthetic data '''
             if it in eval_it_pool:
                 for model_eval in model_eval_pool:
-                    print('-------------------------\nEvaluation\nmodel_train = %s, model_eval = %s, iteration = %d'%(args.model, model_eval, it))
+                    logger.info('-------------------------\nEvaluation\nmodel_train = %s, model_eval = %s, iteration = %d'%(args.model, model_eval, it))
 
-                    print('DSA augmentation strategy: \n', args.dsa_strategy)
-                    print('DSA augmentation parameters: \n', args.dsa_param.__dict__)
+                    logger.info(f'DSA augmentation strategy: {args.dsa_strategy}\n')
+                    logger.info(f'DSA augmentation parameters: {args.dsa_param.__dict__}\n')
 
                     accs = []
                     for it_eval in range(args.num_eval):
@@ -145,13 +169,13 @@ def main():
                         image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach()) # avoid any unaware modification
                         _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args)
                         accs.append(acc_test)
-                    print('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------'%(len(accs), model_eval, np.mean(accs), np.std(accs)))
+                    logger.info('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------'%(len(accs), model_eval, np.mean(accs), np.std(accs)))
 
                     if it == args.Iteration: # record the final results
                         accs_all_exps[model_eval] += accs
 
                 ''' visualize and save '''
-                save_name = os.path.join(args.save_path, 'vis_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
+                save_name = os.path.join(save_path, 'vis_mil_instance_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
                 image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
                 for ch in range(channel):
                     image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
@@ -233,17 +257,17 @@ def main():
             loss_avg /= (num_classes)
 
             if it%10 == 0:
-                print('%s iter = %05d, loss = %.4f' % (get_time(), it, loss_avg))
+                logger.info('%s iter = %05d, loss = %.4f' % (get_time(), it, loss_avg))
 
             if it == args.Iteration: # only record the final results
                 data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
 
 
-    print('\n==================== Final Results ====================\n')
+    logger.info('\n==================== Final Results ====================\n')
     for key in model_eval_pool:
         accs = accs_all_exps[key]
-        print('Run %d experiments, train on %s, evaluate %d random %s, mean  = %.2f%%  std = %.2f%%'%(args.num_exp, args.model, len(accs), key, np.mean(accs)*100, np.std(accs)*100))
+        logger.info('Run %d experiments, train on %s, evaluate %d random %s, mean  = %.2f%%  std = %.2f%%'%(args.num_exp, args.model, len(accs), key, np.mean(accs)*100, np.std(accs)*100))
 
 
 
