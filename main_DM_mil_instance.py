@@ -18,7 +18,7 @@ def main():
     parser.add_argument('--model', type=str, default='ConvNet', help='model')
     parser.add_argument('--ipc', type=int, default=10, help='image(s) per class')
     parser.add_argument('--eval_mode', type=str, default='SS', help='eval_mode') # S: the same to training model, M: multi architectures,  W: net width, D: net depth, A: activation function, P: pooling layer, N: normalization layer,
-    parser.add_argument('--num_exp', type=int, default=1, help='the number of experiments')
+    parser.add_argument('--num_exp', type=int, default=3, help='the number of experiments')
     parser.add_argument('--num_eval', type=int, default=3, help='the number of evaluating randomly initialized models')
     parser.add_argument('--epoch_eval_train', type=int, default=1000, help='epochs to train a model with synthetic data') # it can be small for speeding up with little performance drop
     parser.add_argument('--Iteration', type=int, default=6000, help='training iterations')
@@ -30,8 +30,9 @@ def main():
     parser.add_argument('--init', type=str, default='noise', help='noise/real: initialize synthetic images from random noise or randomly sampled real images.')
     parser.add_argument('--dsa_strategy', type=str, default='none', choices=['color_crop_cutout_flip_scale_rotate', 'none'], help='differentiable Siamese augmentation strategy')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
-    parser.add_argument('--save_path', type=str, default='result', help='path to save results')
+    parser.add_argument('--save_path', type=str, required=True, help='path to save results')
     parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
+
 
     ##################### mil settings #####################
     parser.add_argument("--distill_mode", type=str, default="instance", choices=["bag", "instance"])
@@ -59,10 +60,14 @@ def main():
     if not os.path.exists(args.data_path):
         os.mkdir(args.data_path)
 
-    if not os.path.exists(args.save_path):
-        os.mkdir(args.save_path)
+    if not os.path.exists("result"):
+        os.mkdir("result")
 
-    save_path = os.path.join(args.save_path, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+
+    if not os.path.exists(os.path.join("result", args.save_path)):
+        os.mkdir(os.path.join("result", args.save_path))
+
+    save_path = os.path.join("result", args.save_path, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
     if not os.path.exists(save_path):
         os.mkdir(save_path)
 
