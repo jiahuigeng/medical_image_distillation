@@ -531,7 +531,7 @@ class Attention(nn.Module):
 
     def forward(self, x):
         if len(x.shape) == 5:
-            origin_size = x.size()
+            origin_size = list(x.size())
             x = x.view([-1]+origin_size[2:])
 
         x = x.squeeze(0)

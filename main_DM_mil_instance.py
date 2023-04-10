@@ -25,8 +25,8 @@ def main():
     parser.add_argument('--lr_img', type=float, default=1.0, help='learning rate for updating synthetic images')
     parser.add_argument('--lr_net', type=float, default=0.01, help='learning rate for updating network parameters')
     # TODO: change batch_real to 1
-    parser.add_argument('--batch_real', type=int, default=4, help='batch size for real data')
-    parser.add_argument('--batch_train', type=int, default=4, help='batch size for training networks')
+    parser.add_argument('--batch_real', type=int, default=2, help='batch size for real data')
+    parser.add_argument('--batch_train', type=int, default=8, help='batch size for training networks')
     parser.add_argument('--init', type=str, default='noise', help='noise/real: initialize synthetic images from random noise or randomly sampled real images.')
     parser.add_argument('--dsa_strategy', type=str, default='color_crop_cutout_flip_scale_rotate', choices=['color_crop_cutout_flip_scale_rotate', 'none'], help='differentiable Siamese augmentation strategy')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
@@ -38,7 +38,7 @@ def main():
     parser.add_argument("--distill_mode", type=str, default="instance", choices=["bag", "instance"])
     parser.add_argument('--target_number', type=int, default=9, metavar='T',
                         help='bags have a positive labels if they contain at least one 9')
-    parser.add_argument('--mean_bag_length', type=int, default=10, metavar='ML',
+    parser.add_argument('--mean_bag_length', type=int, default=2, metavar='ML',
                         help='average bag length')
     parser.add_argument('--var_bag_length', type=int, default=0, metavar='VL',
                         help='variance of bag length')
@@ -49,6 +49,7 @@ def main():
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
 
+    parser.add_argument('--use_pretrain', type=str, default="models/model_bagsize2_bs1", help='load pretrained model for distillation')
 
     args = parser.parse_args()
     args.method = 'DM'
@@ -200,6 +201,9 @@ def main():
             # embed = net.module.embed if torch.cuda.device_count() > 1 else net.embed # for GPU parallel
 
             net = get_mil_network(args.model, channel, num_classes, im_size).to(args.device)
+            if args.use_pretrain:
+                net.load_state_dict(torch.load(os.path.join(args.use_pretrain, "model.pth")))
+
             net.train()
             for param in list(net.parameters()):
                 param.requires_grad = False
