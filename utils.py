@@ -774,8 +774,14 @@ def DiffAugment(x, strategy='', seed = -1, param = None):
 def rand_scale(x, param):
     # x>1, max scale
     # sx, sy: (0, +oo), 1: orignial size, 0.5: enlarge 2 times
+
+    origin_shape = list(x.size())
+    if len(origin_shape) == 5:
+        x = x.view([-1] + origin_shape[2:])
+
     ratio = param.ratio_scale
     set_seed_DiffAug(param)
+
     sx = torch.rand(x.shape[0]) * (ratio - 1.0/ratio) + 1.0/ratio
     set_seed_DiffAug(param)
     sy = torch.rand(x.shape[0]) * (ratio - 1.0/ratio) + 1.0/ratio
@@ -786,12 +792,19 @@ def rand_scale(x, param):
         theta[:] = theta[0]
     grid = F.affine_grid(theta, x.shape).to(x.device)
     x = F.grid_sample(x, grid)
+
+    x = x.view(origin_shape)
     return x
 
 
 def rand_rotate(x, param): # [-180, 180], 90: anticlockwise 90 degree
     ratio = param.ratio_rotate
     set_seed_DiffAug(param)
+
+    origin_shape = list(x.size())
+    if len(origin_shape) == 5:
+        x = x.view([-1] + origin_shape[2:])
+
     theta = (torch.rand(x.shape[0]) - 0.5) * 2 * ratio / 180 * float(np.pi)
     theta = [[[torch.cos(theta[i]), torch.sin(-theta[i]), 0],
         [torch.sin(theta[i]), torch.cos(theta[i]),  0],]  for i in range(x.shape[0])]
@@ -800,29 +813,48 @@ def rand_rotate(x, param): # [-180, 180], 90: anticlockwise 90 degree
         theta[:] = theta[0]
     grid = F.affine_grid(theta, x.shape).to(x.device)
     x = F.grid_sample(x, grid)
+
+    x = x.view(origin_shape)
     return x
 
 
 def rand_flip(x, param):
+    origin_shape = list(x.size())
+    if len(origin_shape) == 5:
+        x = x.view([-1] + origin_shape[2:])
+
     prob = param.prob_flip
     set_seed_DiffAug(param)
     randf = torch.rand(x.size(0), 1, 1, 1, device=x.device)
     if param.Siamese: # Siamese augmentation:
         randf[:] = randf[0]
-    return torch.where(randf < prob, x.flip(3), x)
+
+    torch.where(randf < prob, x.flip(3), x)
+    x = x.view(origin_shape)
+    return x
 
 
 def rand_brightness(x, param):
+    origin_shape = list(x.size())
+    if len(origin_shape) == 5:
+        x = x.view([-1] + origin_shape[2:])
+
     ratio = param.brightness
     set_seed_DiffAug(param)
     randb = torch.rand(x.size(0), 1, 1, 1, dtype=x.dtype, device=x.device)
     if param.Siamese:  # Siamese augmentation:
         randb[:] = randb[0]
     x = x + (randb - 0.5)*ratio
+
+    x = x.view(origin_shape)
     return x
 
 
 def rand_saturation(x, param):
+    origin_shape = list(x.size())
+    if len(origin_shape) == 5:
+        x = x.view([-1] + origin_shape[2:])
+
     ratio = param.saturation
     x_mean = x.mean(dim=1, keepdim=True)
     set_seed_DiffAug(param)
@@ -830,10 +862,15 @@ def rand_saturation(x, param):
     if param.Siamese:  # Siamese augmentation:
         rands[:] = rands[0]
     x = (x - x_mean) * (rands * ratio) + x_mean
+    x = x.view(origin_shape)
     return x
 
 
 def rand_contrast(x, param):
+    origin_shape = list(x.size())
+    if len(origin_shape) == 5:
+        x = x.view([-1] + origin_shape[2:])
+
     ratio = param.contrast
     x_mean = x.mean(dim=[1, 2, 3], keepdim=True)
     set_seed_DiffAug(param)
@@ -841,11 +878,17 @@ def rand_contrast(x, param):
     if param.Siamese:  # Siamese augmentation:
         randc[:] = randc[0]
     x = (x - x_mean) * (randc + ratio) + x_mean
+
+    x = x.view(origin_shape)
     return x
 
 
 def rand_crop(x, param):
     # The image is padded on its surrounding and then cropped.
+    origin_shape = list(x.size())
+    if len(origin_shape) == 5:
+        x = x.view([-1] + origin_shape[2:])
+
     ratio = param.ratio_crop_pad
     shift_x, shift_y = int(x.size(2) * ratio + 0.5), int(x.size(3) * ratio + 0.5)
     set_seed_DiffAug(param)
@@ -864,10 +907,16 @@ def rand_crop(x, param):
     grid_y = torch.clamp(grid_y + translation_y + 1, 0, x.size(3) + 1)
     x_pad = F.pad(x, [1, 1, 1, 1, 0, 0, 0, 0])
     x = x_pad.permute(0, 2, 3, 1).contiguous()[grid_batch, grid_x, grid_y].permute(0, 3, 1, 2)
+
+    x = x.view(origin_shape)
     return x
 
 
 def rand_cutout(x, param):
+    origin_shape = list(x.size())
+    if len(origin_shape) == 5:
+        x = x.view([-1] + origin_shape[2:])
+
     ratio = param.ratio_cutout
     cutout_size = int(x.size(2) * ratio + 0.5), int(x.size(3) * ratio + 0.5)
     set_seed_DiffAug(param)
@@ -887,6 +936,8 @@ def rand_cutout(x, param):
     mask = torch.ones(x.size(0), x.size(2), x.size(3), dtype=x.dtype, device=x.device)
     mask[grid_batch, grid_x, grid_y] = 0
     x = x * mask.unsqueeze(1)
+
+    x = x.view(origin_shape)
     return x
 
 

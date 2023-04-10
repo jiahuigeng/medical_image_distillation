@@ -158,35 +158,35 @@ def main():
 
         for it in range(args.Iteration+1):
 
-            ''' Evaluate synthetic data '''
-            if it in eval_it_pool:
-                for model_eval in model_eval_pool:
-                    logger.info('-------------------------\nEvaluation\nmodel_train = %s, model_eval = %s, iteration = %d'%(args.model, model_eval, it))
-
-                    logger.info(f'DSA augmentation strategy: {args.dsa_strategy}\n')
-                    logger.info(f'DSA augmentation parameters: {args.dsa_param.__dict__}\n')
-
-                    accs = []
-                    for it_eval in range(args.num_eval):
-                        # TODO: use attention network
-
-                        net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device) # get a random model
-                        image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach()) # avoid any unaware modification
-                        _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args)
-                        accs.append(acc_test)
-                    logger.info('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------'%(len(accs), model_eval, np.mean(accs), np.std(accs)))
-
-                    if it == args.Iteration: # record the final results
-                        accs_all_exps[model_eval] += accs
-
-                ''' visualize and save '''
-                save_name = os.path.join(save_path, 'vis_mil_instance_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
-                image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
-                for ch in range(channel):
-                    image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
-                image_syn_vis[image_syn_vis<0] = 0.0
-                image_syn_vis[image_syn_vis>1] = 1.0
-                save_image(image_syn_vis, save_name, nrow=args.ipc) # Trying normalize = True/False may get better visual effects.
+            # ''' Evaluate synthetic data '''
+            # if it in eval_it_pool:
+            #     for model_eval in model_eval_pool:
+            #         logger.info('-------------------------\nEvaluation\nmodel_train = %s, model_eval = %s, iteration = %d'%(args.model, model_eval, it))
+            #
+            #         logger.info(f'DSA augmentation strategy: {args.dsa_strategy}\n')
+            #         logger.info(f'DSA augmentation parameters: {args.dsa_param.__dict__}\n')
+            #
+            #         accs = []
+            #         for it_eval in range(args.num_eval):
+            #             # TODO: use attention network
+            #
+            #             net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device) # get a random model
+            #             image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach()) # avoid any unaware modification
+            #             _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args)
+            #             accs.append(acc_test)
+            #         logger.info('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------'%(len(accs), model_eval, np.mean(accs), np.std(accs)))
+            #
+            #         if it == args.Iteration: # record the final results
+            #             accs_all_exps[model_eval] += accs
+            #
+            #     ''' visualize and save '''
+            #     save_name = os.path.join(save_path, 'vis_mil_instance_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
+            #     image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
+            #     for ch in range(channel):
+            #         image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
+            #     image_syn_vis[image_syn_vis<0] = 0.0
+            #     image_syn_vis[image_syn_vis>1] = 1.0
+            #     save_image(image_syn_vis, save_name, nrow=args.ipc) # Trying normalize = True/False may get better visual effects.
 
 
 
@@ -268,6 +268,41 @@ def main():
                 data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
                 torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
 
+            ''' Evaluate synthetic data '''
+            if it in eval_it_pool:
+                for model_eval in model_eval_pool:
+                    logger.info('-------------------------\nEvaluation\nmodel_train = %s, model_eval = %s, iteration = %d' % (
+                    args.model, model_eval, it))
+
+                    logger.info(f'DSA augmentation strategy: {args.dsa_strategy}\n')
+                    logger.info(f'DSA augmentation parameters: {args.dsa_param.__dict__}\n')
+
+                    accs = []
+                    for it_eval in range(args.num_eval):
+                        # TODO: use attention network
+
+                        net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device)  # get a random model
+                        image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(
+                            label_syn.detach())  # avoid any unaware modification
+                        _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader,
+                                                                 args)
+                        accs.append(acc_test)
+                    logger.info('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------' % (
+                    len(accs), model_eval, np.mean(accs), np.std(accs)))
+
+                    if it == args.Iteration:  # record the final results
+                        accs_all_exps[model_eval] += accs
+
+                ''' visualize and save '''
+                save_name = os.path.join(save_path, 'vis_mil_instance_%s_%s_%s_%dipc_exp%d_iter%d.png' % (
+                args.method, args.dataset, args.model, args.ipc, exp, it))
+                image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
+                for ch in range(channel):
+                    image_syn_vis[:, ch] = image_syn_vis[:, ch] * std[ch] + mean[ch]
+                image_syn_vis[image_syn_vis < 0] = 0.0
+                image_syn_vis[image_syn_vis > 1] = 1.0
+                save_image(image_syn_vis, save_name,
+                           nrow=args.ipc)  # Trying normalize = True/False may get better visual effects.
 
     logger.info('\n==================== Final Results ====================\n')
     for key in model_eval_pool:
