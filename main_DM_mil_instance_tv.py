@@ -10,6 +10,15 @@ from torchvision.utils import save_image
 from utils import get_loops, get_dataset, get_mil_dataset, get_network, get_mil_network, \
     get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
 
+def total_variation(x):
+    """Anisotropic TV."""
+    if len(x.shape) == 3:
+        dx = torch.mean(torch.abs(x[ :, :, :-1] - x[ :, :, 1:]))
+        dy = torch.mean(torch.abs(x[ :, :-1, :] - x[ :, 1:, :]))
+    else:
+        dx = torch.mean(torch.abs(x[:, :, :, :-1] - x[:, :, :, 1:]))
+        dy = torch.mean(torch.abs(x[:, :, :-1, :] - x[:, :, 1:, :]))
+    return dx + dy
 
 def main():
 
@@ -49,7 +58,8 @@ def main():
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
     parser.add_argument('--clip_alpha', type=int, default=10, help="coefficient for clip loss")
-    parser.add_argument('--scale_alpha', type=int, default=0, help="coefficient for clip loss")
+    parser.add_argument('--scale_alpha', type=int, default=0, help="coefficient for scale loss")
+    parser.add_argument('--tv_alpha', type=int, default=0, help="coefficient for total variation loss")
 
     parser.add_argument('--use_pretrain', type=str, default="", help='load pretrained model for distillation')
 
@@ -236,9 +246,10 @@ def main():
                     clip_loss = torch.square(img_syn - torch.clip(img_syn, 0, 1)).detach()
                     syn_max, syn_min = torch.max(img_syn), torch.min(img_syn)
                     scale = syn_max - syn_min
+
                     scale_loss = torch.square((img_syn - syn_min)/scale - img_syn).detach()
                     loss += torch.sum((torch.mean(output_real, dim=0) - torch.mean(output_syn, dim=0))**2)
-                    loss += args.clip_alpha *torch.sum(clip_loss) + args.scale_alpha * torch.sum(scale_loss)
+                    loss += args.clip_alpha *torch.sum(clip_loss) + args.scale_alpha * torch.sum(scale_loss) + args.tv_alpha * total_variation(img_syn)
 
             else: # for ConvNetBN
                 images_real_all = []
@@ -267,7 +278,7 @@ def main():
                 scale = syn_max - syn_min
                 scale_loss = torch.square((img_syn - syn_min) / scale - img_syn).detach()
                 loss += torch.sum((torch.mean(output_real.reshape(num_classes, args.batch_real, -1), dim=1) - torch.mean(output_syn.reshape(num_classes, args.ipc, -1), dim=1))**2)
-                loss += args.clip_alpha *torch.sum(clip_loss) + args.scale_alpha * torch.sum(scale_loss)
+                loss += args.clip_alpha *torch.sum(clip_loss) + args.scale_alpha * torch.sum(scale_loss) + args.tv_alpha * total_variation(img_syn)
 
 
 
