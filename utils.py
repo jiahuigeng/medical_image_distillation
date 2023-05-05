@@ -47,113 +47,6 @@ class H5Dataset(Dataset):
 
         return (image, label)
 
-# class MILDataset(data_utils.Dataset):
-#     def __init__(self, dataset="MNIST", target_number=9, mean_bag_length=10, var_bag_length=0, num_bag=250, seed=1, train=True):
-#         self.dataset = dataset
-#         self.target_number = target_number
-#         self.mean_bag_length = mean_bag_length
-#         self.var_bag_length = var_bag_length
-#         self.num_bag = num_bag
-#         self.train = train
-#
-#         self.r = np.random.RandomState(seed)
-#
-#         if self.dataset == "MNIST":
-#             self.num_in_train = 60000
-#             self.num_in_test = 10000
-#         elif self.dataset == "CIFAR10":
-#             self.num_in_train = 50000
-#             self.num_in_test = 10000
-#
-#         if self.train:
-#             self.train_bags_list, self.train_labels_list = self._create_bags()
-#         else:
-#             self.test_bags_list, self.test_labels_list = self._create_bags()
-#
-#     def _create_bags(self):
-#         if self.train:
-#             if self.dataset == "MNIST":
-#                 dataset = datasets.MNIST('data',
-#                                           train=True,
-#                                           download=True,
-#                                           transform=transforms.Compose([
-#                                               transforms.ToTensor(),
-#                                               transforms.Normalize((0.1307,), (0.3081,))]))
-#                 loader = data_utils.DataLoader(dataset,
-#                                                batch_size=self.num_in_train,
-#                                                shuffle=False)
-#
-#             elif self.dataset == "CIFAR10":
-#                 mean = [0.4914, 0.4822, 0.4465]
-#                 std = [0.2023, 0.1994, 0.2010]
-#                 transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
-#                 loader = data_utils.DataLoader(datasets.CIFAR10('data',
-#                                                               train=True,
-#                                                               download=True,
-#                                                               transform=transform),
-#                                                batch_size=self.num_in_train,
-#                                                shuffle=False)
-#         else:
-#             if self.dataset == "MNIST":
-#                 loader = data_utils.DataLoader(datasets.MNIST('data',
-#                                                               train=False,
-#                                                               download=True,
-#                                                               transform=transforms.Compose([
-#                                                                   transforms.ToTensor(),
-#                                                                   transforms.Normalize((0.1307,), (0.3081,))])),
-#                                                batch_size=self.num_in_test,
-#                                                shuffle=False)
-#             elif self.dataset == "CIFAR10":
-#                 mean = [0.4914, 0.4822, 0.4465]
-#                 std = [0.2023, 0.1994, 0.2010]
-#                 transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
-#                 loader = data_utils.DataLoader(datasets.CIFAR10('data',
-#                                                               train=False,
-#                                                               download=True,
-#                                                               transform=transform),
-#                                                batch_size=self.num_in_test,
-#                                                shuffle=False)
-#
-#         for (batch_data, batch_labels) in loader:
-#             all_imgs = batch_data
-#             all_labels = batch_labels
-#
-#         bags_list = []
-#         labels_list = []
-#
-#         for i in range(self.num_bag):
-#             bag_length = np.int(self.r.normal(self.mean_bag_length, self.var_bag_length, 1))
-#             if bag_length < 1:
-#                 bag_length = 1
-#
-#             if self.train:
-#                 indices = torch.LongTensor(self.r.randint(0, self.num_in_train, bag_length))
-#             else:
-#                 indices = torch.LongTensor(self.r.randint(0, self.num_in_test, bag_length))
-#
-#             labels_in_bag = all_labels[indices]
-#             labels_in_bag = labels_in_bag == self.target_number
-#
-#             bags_list.append(all_imgs[indices])
-#             labels_list.append(labels_in_bag)
-#
-#         return bags_list, labels_list
-#
-#     def __len__(self):
-#         if self.train:
-#             return len(self.train_labels_list)
-#         else:
-#             return len(self.test_labels_list)
-#
-#     def __getitem__(self, index):
-#         if self.train:
-#             bag = self.train_bags_list[index]
-#             label = [max(self.train_labels_list[index]), self.train_labels_list[index]]
-#         else:
-#             bag = self.test_bags_list[index]
-#             label = [max(self.test_labels_list[index]), self.test_labels_list[index]]
-#
-#         return bag, label
 
 class MILDataset(Dataset):
     def __init__(self, dataset="MNIST", target_number=9, max_instances=15, mean_bag_length=10, var_bag_length=0,
@@ -175,15 +68,7 @@ class MILDataset(Dataset):
         bag = self.data[index]
         label = self.labels[index]
         return bag, [max(label), label]
-        # num_instances = bag.shape[0]
 
-
-        # padded_bag = torch.zeros(((self.max_instances,)+ bag.shape[1:]))
-        # padded_bag[:num_instances] = bag
-        #
-        # padded_label = torch.zeros(((self.max_instances)), dtype=bool)
-        # padded_label[:num_instances] = label
-        # return padded_bag, [max(padded_label), padded_label]
 
 
     def __create_bags__(self):
@@ -273,8 +158,9 @@ def get_mil_dataset(args):
 
         if args.distill_mode == "instance":
             transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
-            dst_test = datasets.FashionMNIST("data", train=False, download=True, transform=transform)
+            dst_test = datasets.CIFAR10("data", train=False, download=True, transform=transform)
             dst_test.targets = (dst_test.targets == args.target_number)
+
 
     testloader = torch.utils.data.DataLoader(dst_test, batch_size=1, shuffle=False, num_workers=0)
     return channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader
@@ -286,7 +172,7 @@ def get_mil_dataset(args):
 
 
 
-def get_dataset(dataset, data_path):
+def get_dataset(dataset, data_path, target_number=None):
     if dataset == 'MNIST':
         channel = 1
         im_size = (28, 28)
@@ -401,9 +287,14 @@ def get_dataset(dataset, data_path):
     else:
         exit('unknown dataset: %s'%dataset)
 
+    if isinstance(target_number, int):
+        dst_train.targets = (dst_train.targets == target_number)
+        dst_test.targets = (dst_test.targets == target_number)
+        num_classes = 2
 
     testloader = torch.utils.data.DataLoader(dst_test, batch_size=256, shuffle=False, num_workers=0)
     return channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader
+
 
 
 
@@ -644,7 +535,10 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
                 img = DiffAugment(img, args.dsa_strategy, param=args.dsa_param)
             else:
                 img = augment(img, args.dc_aug_param, device=args.device)
-        lab = datum[1].long().to(args.device)
+        try:
+            lab = datum[1].long().to(args.device)
+        except:
+            lab = datum[1][0].long().to(args.device)
         n_b = lab.shape[0]
 
         output = net(img)

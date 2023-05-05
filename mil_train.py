@@ -94,7 +94,7 @@ def test(model, test_loader):
         if args.cuda:
             data, bag_label = data.cuda(), bag_label.cuda()
         data, bag_label = Variable(data), Variable(bag_label)
-        loss, attention_weights = model.calculate_objective(data, bag_label)
+        loss = model.calculate_objective(data, bag_label) # attention_weights
         test_loss += loss.data[0]
         error, predicted_label = model.calculate_classification_error(data, bag_label)
         test_error += error

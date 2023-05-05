@@ -525,13 +525,17 @@ class Attention(nn.Module):
         )
 
         self.classifier = nn.Sequential(
-            nn.Linear(self.L*self.K, 1),
-            nn.Sigmoid()
+            nn.Linear(self.L*self.K, 2),
+            nn.Softmax()
         )
 
     def forward(self, x):
+        flag = False
+
         if len(x.shape) == 5:
+            flag = True
             origin_size = list(x.size())
+            batch_size = list(x.shape[:2])
             x = x.view([-1]+origin_size[2:])
 
         x = x.squeeze(0)
@@ -542,19 +546,28 @@ class Attention(nn.Module):
 
         H = self.feature_extractor_part2(H)  # NxL
         # 10 500
+        if flag:
+            H = H.view(batch_size + [-1])
+
         A = self.attention(H)  # NxK
 
-        A = torch.transpose(A, 1, 0)  # KxN
+        if flag:
+            A = torch.transpose(A, 2, 1)
+            A = F.softmax(A, dim=2)
+        else:
+            A = torch.transpose(A, 1, 0)  # KxN
+            A = F.softmax(A, dim=1)  # softmax over N
 
-        A = F.softmax(A, dim=1)  # softmax over N
-
-        M = torch.mm(A, H)  # KxL
+        M = torch.matmul(A, H)  # KxL
         #  1 * 500
+
+        if flag:
+            M = torch.squeeze(M, 1)
         Y_prob = self.classifier(M)
 
-        Y_hat = torch.ge(Y_prob, 0.5).float()
+        # Y_hat = torch.ge(Y_prob, 0.5).float()
 
-        return Y_prob, Y_hat, A
+        return Y_prob #, Y_hat, A
 
     def embed(self, x):
         origin_shape = list(x.size())
@@ -593,11 +606,11 @@ class Attention(nn.Module):
 
     def calculate_objective(self, X, Y):
         Y = Y.float()
-        Y_prob, _, A = self.forward(X)
+        Y_prob,  = self.forward(X) # _, A
         Y_prob = torch.clamp(Y_prob, min=1e-5, max=1. - 1e-5)
         neg_log_likelihood = -1. * (Y * torch.log(Y_prob) + (1. - Y) * torch.log(1. - Y_prob))  # negative log bernoulli
 
-        return neg_log_likelihood, A
+        return neg_log_likelihood #, A
 
 class AttentionMIL(nn.Module):
     def __init__(self):
