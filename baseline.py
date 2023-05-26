@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import copy
 import argparse
@@ -7,6 +8,9 @@ import torch
 import torch.nn as nn
 from torchvision.utils import save_image
 from utils import get_loops, get_dataset, get_mil_dataset, get_network, get_mil_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
+import logging
+import datetime
+
 
 
 def main():
@@ -28,7 +32,7 @@ def main():
     parser.add_argument('--init', type=str, default='real', help='noise/real: initialize synthetic images from random noise or randomly sampled real images.')
     parser.add_argument('--dsa_strategy', type=str, default='color_crop_cutout_flip_scale_rotate', help='differentiable Siamese augmentation strategy')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
-    parser.add_argument('--save_path', type=str, default='result', help='path to save results')
+    parser.add_argument('--save_path', type=str, required=True, help='path to save results')
     parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
 
 
@@ -49,73 +53,109 @@ def main():
     args = parser.parse_args()
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    if not os.path.exists(os.path.join("result", args.save_path)):
+        os.mkdir(os.path.join("result", args.save_path))
 
-    if args.distill_mode == "instance":
-        channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path, args.target_number)
-        model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
+    save_path = os.path.join("result", args.save_path, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+    if not os.path.exists(save_path):
+        os.mkdir(save_path)
 
-        images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
-        labels_all = [dst_train[i][1] for i in range(len(dst_train))]
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
 
-    elif args.distill_mode == "bag":
-        channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_mil_dataset(args)
-        model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(logging.DEBUG)
+    stdout_handler.setFormatter(formatter)
 
-        images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
-        labels_all = [dst_train[i][1][0] for i in range(len(dst_train))]
+    file_handler = logging.FileHandler(os.path.join(save_path, 'logs.log'))
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(stdout_handler)
+
+    for ipc_size in [10, 20, 50, 100]:
+        args.ipc = ipc_size
+        for bag_size in [2,4,8,16]:
+            args.mean_bag_length = bag_size
+
+            if args.distill_mode == "instance":
+                channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path, args.target_number)
+                model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
+
+                images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
+                labels_all = [dst_train[i][1] for i in range(len(dst_train))]
+
+            elif args.distill_mode == "bag":
+                channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_mil_dataset(args)
+                model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
+
+                images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
+                labels_all = [dst_train[i][1][0] for i in range(len(dst_train))]
 
 
-    indices_class = [[] for c in range(num_classes)]
-    for i, lab in enumerate(labels_all):
-        indices_class[lab].append(i)
+            indices_class = [[] for c in range(num_classes)]
+            for i, lab in enumerate(labels_all):
+                indices_class[lab].append(i)
+
+            if not os.path.exists(os.path.join("result", args.save_path)):
+                os.mkdir(os.path.join("result", args.save_path))
 
 
-    for exp in range(args.num_exp):
-        print('\n================== Exp %d ==================\n '%exp)
-        print('Hyper-parameters: \n', args.__dict__)
-        # print('Evaluation model pool: ', model_eval_pool)
+            total_acc = []
 
-        ''' organize the real dataset '''
+            for exp in range(args.num_exp):
+                logger.info('\n================== Exp %d ==================\n '%exp)
+                logger.info('Hyper-parameters: %s \n' % args.__dict__)
+                # print('Evaluation model pool: ', model_eval_pool)
 
-        def get_images(c, n): # get random n images from class c
-            idx_shuffle = np.random.permutation(indices_class[c])[:n]
-            return torch.cat([images_all[i] for i in idx_shuffle], dim=0).to(args.device)
+                ''' organize the real dataset '''
+
+                def get_images(c, n): # get random n images from class c
+                    idx_shuffle = np.random.permutation(indices_class[c])[:n]
+                    return torch.cat([images_all[i] for i in idx_shuffle], dim=0).to(args.device)
 
 
-        #
-        if args.distill_mode == "instance":
-            image_rnd = torch.randn(size=(num_classes * args.ipc, channel, im_size[0], im_size[1]), dtype=torch.float,
-                                    requires_grad=True, device=args.device)
-        else:
-            image_rnd = torch.randn(
-                size=(num_classes * args.ipc, args.mean_bag_length, channel, im_size[0], im_size[1]), dtype=torch.float,
-                device=args.device)
-
-        for c in range(num_classes):
-            image_rnd.data[c * args.ipc:(c + 1) * args.ipc] = get_images(c, args.ipc).detach().data
-            label_rnd = torch.tensor([np.ones(args.ipc) * i for i in range(num_classes)], dtype=torch.long,
-                                     requires_grad=False, device=args.device).view(-1)
-
-        for model_eval in model_eval_pool:
-            print('-------------------------\nEvaluation\nmodel_train = %s, model_eval = %s' % (
-            args.model, model_eval))
-
-            # print('DSA augmentation strategy: \n', args.dsa_strategy)
-            # print('DSA augmentation parameters: \n', args.dsa_param.__dict__)
-
-            accs = []
-            for it_eval in range(args.num_eval):
+                #
                 if args.distill_mode == "instance":
-                    net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device)  # get a random model
+                    image_rnd = torch.randn(size=(num_classes * args.ipc, channel, im_size[0], im_size[1]), dtype=torch.float,
+                                            requires_grad=True, device=args.device)
                 else:
-                    net_eval = get_mil_network(args.model, channel, num_classes, im_size).to(args.device)
-                # image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(
-                #     label_syn.detach())  # avoid any unaware modification
-                _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_rnd, label_rnd, testloader,
-                                                         args)
-                accs.append(acc_test)
-            print('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------' % (
-            len(accs), model_eval, np.mean(accs), np.std(accs)))
+                    image_rnd = torch.randn(
+                        size=(num_classes * args.ipc, args.mean_bag_length, channel, im_size[0], im_size[1]), dtype=torch.float,
+                        device=args.device)
+
+                for c in range(num_classes):
+                    image_rnd.data[c * args.ipc:(c + 1) * args.ipc] = get_images(c, args.ipc).detach().data
+                    label_rnd = torch.tensor([np.ones(args.ipc) * i for i in range(num_classes)], dtype=torch.long,
+                                             requires_grad=False, device=args.device).view(-1)
+
+                for model_eval in model_eval_pool:
+                    logger.info('-------------------------\nEvaluation\nmodel_train = %s, model_eval = %s' % (
+                    args.model, model_eval))
+
+                    # print('DSA augmentation strategy: \n', args.dsa_strategy)
+                    # print('DSA augmentation parameters: \n', args.dsa_param.__dict__)
+
+                    accs = []
+                    for it_eval in range(args.num_eval):
+                        if args.distill_mode == "instance":
+                            net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device)  # get a random model
+                        else:
+                            net_eval = get_mil_network(args.model, channel, num_classes, im_size).to(args.device)
+                        # image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(
+                        #     label_syn.detach())  # avoid any unaware modification
+                        _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_rnd, label_rnd, testloader,
+                                                                 args)
+                        accs.append(acc_test)
+                    logger.info('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------' % (
+                    len(accs), model_eval, np.mean(accs), np.std(accs)))
+
+                    total_acc += accs
+
+                logger.info('Finally Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------' % (
+                    len(total_acc), model_eval, np.mean(total_acc), np.std(total_acc)))
 
 
 
