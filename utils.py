@@ -101,8 +101,12 @@ class MILDataset(Dataset):
                 dataset = datasets.CIFAR10('data', train=False, download=True, transform=transform)
 
         origin_data, origin_labels = dataset.data, dataset.targets
-        origin_data = origin_data.float() / 255.0
-        origin_data = origin_data.unsqueeze(1)
+        if self.dataset == "MNIST":
+            origin_data = origin_data.float() / 255.0
+            origin_data = origin_data.unsqueeze(1)
+        elif self.dataset == "CIFAR10":
+            origin_data = torch.from_numpy(origin_data)
+            origin_labels = torch.as_tensor(origin_labels)
         len_dst = len(dataset)
         index = list(range(len_dst))
         if self.train:
