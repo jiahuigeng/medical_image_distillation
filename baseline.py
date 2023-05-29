@@ -154,8 +154,8 @@ def main():
 
                     total_acc += accs
 
-                logger.info('Finally Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------' % (
-                    len(total_acc), model_eval, np.mean(total_acc), np.std(total_acc)))
+            logger.info('Finally Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------' % (
+                len(total_acc), model_eval, np.mean(total_acc), np.std(total_acc)))
 
 
 
