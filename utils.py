@@ -10,6 +10,8 @@ from torchvision import datasets, transforms
 from random import shuffle
 from scipy.ndimage.interpolation import rotate as scipyrotate
 from networks import MLP, ConvNet, LeNet, AlexNet, AlexNetBN, VGG11, VGG11BN, ResNet18, ResNet18BN_AP, ResNet18BN, Attention
+from tqdm import tqdm
+import torchvision
 
 class H5Dataset(Dataset):
     def __init__(self, path, transform=None):
@@ -100,33 +102,45 @@ class MILDataset(Dataset):
             else:
                 dataset = datasets.CIFAR10('data', train=False, download=True, transform=transform)
 
-        origin_data, origin_labels = dataset.data, dataset.targets
-        if self.dataset == "MNIST":
-            origin_data = origin_data.float() / 255.0
-            origin_data = origin_data.unsqueeze(1)
-        elif self.dataset == "CIFAR10":
-            origin_data = torch.from_numpy(origin_data)
-            origin_labels = torch.as_tensor(origin_labels)
-        len_dst = len(dataset)
-        index = list(range(len_dst))
-        if self.train:
-            shuffle(index)
+        # origin_data, origin_labels = dataset.data, dataset.targets
+        # if self.dataset == "MNIST":
+        #     origin_data = origin_data.float() / 255.0
+        #     origin_data = origin_data.unsqueeze(1)
+        # elif self.dataset == "CIFAR10":
+        #     origin_data = torch.from_numpy(origin_data)
+        #     origin_labels = torch.as_tensor(origin_labels)
+        # len_dst = len(dataset)
+        # index = list(range(len_dst))
+        # if self.train:
+        #     shuffle(index)
 
-        idx = 0
-        bags = []
+        # idx = 0
+        # bags = []
 
-        labels = []
-        while idx < len_dst:
-            bag_length = np.int(self.r.normal(self.mean_bag_length, self.var_bag_length, 1))
-            bag_length = 1 if bag_length < 1 else self.max_instances if bag_length > self.max_instances else bag_length
-            bag_index = torch.LongTensor(index[idx: min(len_dst, idx+bag_length)])
-            images_in_bag = origin_data[bag_index]
-            labels_in_bag = origin_labels[bag_index] == self.target_number
-            idx += bag_length
-            bags.append(images_in_bag)
-            labels.append(labels_in_bag)
+        # labels = []
+        # while idx < len_dst:
+        #     bag_length = int(self.r.normal(self.mean_bag_length, self.var_bag_length, 1))
+        #     bag_length = 1 if bag_length < 1 else self.max_instances if bag_length > self.max_instances else bag_length
+        #     bag_index = torch.LongTensor(index[idx: min(len_dst, idx+bag_length)])
+        #     images_in_bag = origin_data[bag_index]
+        #     labels_in_bag = origin_labels[bag_index] == self.target_number
+        #     idx += bag_length
+        #     bags.append(images_in_bag)
+        #     labels.append(labels_in_bag)
 
-        return bags, labels
+        # return bags, labels
+        Xs, ys = [], []
+        dst_loader = torch.utils.data.DataLoader(dataset, batch_size=self.mean_bag_length, shuffle=True, num_workers=0)
+        for idx, (inputs, labels) in tqdm(enumerate(dst_loader)):
+            images_in_bag = inputs
+
+            labels_in_bag = (labels == self.target_number).long()
+            Xs.append(images_in_bag)
+            ys.append(labels_in_bag)
+
+
+        return Xs, ys
+
 
 def get_mil_dataset(args):
     dst_train = MILDataset(dataset=args.dataset, target_number=args.target_number,  mean_bag_length=args.mean_bag_length,
@@ -149,7 +163,8 @@ def get_mil_dataset(args):
         if args.distill_mode == "instance":
             transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
             dst_test = datasets.MNIST("data", train=False, download=True, transform=transform)
-            dst_test.targets = (dst_test.targets == args.target_number)
+            # dst_test.targets = (torch.IntTensor(dst_test.targets) == args.target_number).long()
+            dst_test.targets = (dst_test.targets == args.target_number).long()
 
 
     elif args.dataset == "CIFAR10":
@@ -163,7 +178,7 @@ def get_mil_dataset(args):
         if args.distill_mode == "instance":
             transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
             dst_test = datasets.CIFAR10("data", train=False, download=True, transform=transform)
-            dst_test.targets = (dst_test.targets == args.target_number)
+            dst_test.targets = (torch.IntTensor(dst_test.targets) == args.target_number).long()
 
 
     testloader = torch.utils.data.DataLoader(dst_test, batch_size=1, shuffle=False, num_workers=0)
@@ -321,7 +336,7 @@ def get_default_convnet_setting():
 
 
 
-def get_network(model, channel, num_classes, im_size=(32, 32)):
+def get_network(model, channel, num_classes, im_size=(32, 32), args=None):
     torch.random.manual_seed(int(time.time() * 1000) % 100000)
     net_width, net_depth, net_act, net_norm, net_pooling = get_default_convnet_setting()
 
@@ -410,7 +425,7 @@ def get_network(model, channel, num_classes, im_size=(32, 32)):
 
     return net
 
-def get_mil_network(model, channel, num_classes, im_size=(32, 32)):
+def get_mil_network(model, channel, num_classes, im_size=(32, 32), args=None):
     '''
     :param model:
     :param channel:
@@ -421,7 +436,7 @@ def get_mil_network(model, channel, num_classes, im_size=(32, 32)):
     torch.random.manual_seed(int(time.time() * 1000) % 100000)
     net_width, net_depth, net_act, net_norm, net_pooling = get_default_convnet_setting()
 
-    net = Attention()
+    net = Attention(channel=channel, num_classes=num_classes, im_size=im_size, batch_size=args.batch_real)
 
     gpu_num = torch.cuda.device_count()
     if gpu_num>0:
@@ -530,7 +545,6 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
         net.train()
     else:
         net.eval()
-
     for i_batch, datum in enumerate(dataloader):
         # print("i_batch", i_batch)
         img = datum[0].float().to(args.device)

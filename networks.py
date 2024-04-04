@@ -498,14 +498,14 @@ def ResNet152(channel, num_classes):
 
 '''Attention Net'''
 class Attention(nn.Module):
-    def __init__(self):
+    def __init__(self, *, channel=1, num_classes=2, im_size=(28, 28), batch_size=2):
         super(Attention, self).__init__()
         self.L = 500
         self.D = 128
         self.K = 1
 
         self.feature_extractor_part1 = nn.Sequential(
-            nn.Conv2d(1, 20, kernel_size=5),
+            nn.Conv2d(channel, 20, kernel_size=5),
             nn.ReLU(),
             nn.MaxPool2d(2, stride=2),
             nn.Conv2d(20, 50, kernel_size=5),
@@ -513,8 +513,12 @@ class Attention(nn.Module):
             nn.MaxPool2d(2, stride=2)
         )
 
+        self.input_dim = ((im_size[0] - 5 ) // 2 -5) // 2 + 1
+
         self.feature_extractor_part2 = nn.Sequential(
-            nn.Linear(50 * 4 * 4, self.L),
+            # nn.Linear(50 * 4 * 4, self.L),
+            nn.Linear(50 * self.input_dim * self.input_dim, self.L),
+            # nn.Linear(self.input_dim, self.L),
             nn.ReLU(),
         )
 
@@ -525,7 +529,7 @@ class Attention(nn.Module):
         )
 
         self.classifier = nn.Sequential(
-            nn.Linear(self.L*self.K, 2),
+            nn.Linear(self.L*self.K, num_classes),
             nn.Softmax()
         )
 
@@ -542,7 +546,8 @@ class Attention(nn.Module):
 
         H = self.feature_extractor_part1(x)
         # 1 50 4 4
-        H = H.view(-1, 50 * 4 * 4)
+        # H = H.view(-1, 50 * 4 * 4)
+        H = H.view(-1, 50 * self.input_dim * self.input_dim)
 
         H = self.feature_extractor_part2(H)  # NxL
         # 10 500
@@ -577,10 +582,11 @@ class Attention(nn.Module):
             x = x.view([-1]+origin_shape[2:])
 
         x = x.squeeze(0)
-
         H = self.feature_extractor_part1(x)
+
         # 13 50 4 4
-        H = H.view(batch_size, -1, 50 * 4 * 4)
+        # H = H.view(batch_size, -1, 50 * 4 * 4)
+        H = H.view(batch_size, -1, 50 * self.input_dim* self.input_dim)
 
         H = self.feature_extractor_part2(H)  # NxL
         # 13 500

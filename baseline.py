@@ -10,7 +10,7 @@ from torchvision.utils import save_image
 from utils import get_loops, get_dataset, get_mil_dataset, get_network, get_mil_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
 import logging
 import datetime
-
+import torchvision
 
 
 def main():
@@ -161,5 +161,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-

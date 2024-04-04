@@ -9,19 +9,21 @@ import torch.nn as nn
 from torchvision.utils import save_image
 from utils import get_loops, get_dataset, get_mil_dataset, get_network, get_mil_network, \
     get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
-
+import wandb
+import torchvision
 
 def main():
 
     parser = argparse.ArgumentParser(description='Parameter Processing')
     parser.add_argument('--dataset', type=str, default='MNIST', help='dataset')
+    # parser.add_argument('--model', type=str, default='ConvNet', help='model')
     parser.add_argument('--model', type=str, default='ConvNet', help='model')
     parser.add_argument('--ipc', type=int, default=10, help='image(s) per class')
     parser.add_argument('--eval_mode', type=str, default='SS', help='eval_mode') # S: the same to training model, M: multi architectures,  W: net width, D: net depth, A: activation function, P: pooling layer, N: normalization layer,
-    parser.add_argument('--num_exp', type=int, default=3, help='the number of experiments')
+    parser.add_argument('--num_exp', type=int, default=1, help='the number of experiments')
     parser.add_argument('--num_eval', type=int, default=3, help='the number of evaluating randomly initialized models')
     parser.add_argument('--epoch_eval_train', type=int, default=1000, help='epochs to train a model with synthetic data') # it can be small for speeding up with little performance drop
-    parser.add_argument('--Iteration', type=int, default=6000, help='training iterations')
+    parser.add_argument('--Iteration', type=int, default=10000, help='training iterations')
     parser.add_argument('--lr_img', type=float, default=1.0, help='learning rate for updating synthetic images')
     parser.add_argument('--lr_net', type=float, default=0.01, help='learning rate for updating network parameters')
     # TODO: change batch_real to 1
@@ -52,6 +54,7 @@ def main():
     parser.add_argument('--scale_alpha', type=int, default=0, help="coefficient for clip loss")
 
     parser.add_argument('--use_pretrain', type=str, default="", help='load pretrained model for distillation')
+    parser.add_argument('--use_wandb', action='store_true', help='')
 
     args = parser.parse_args()
     args.method = 'DM'
@@ -60,13 +63,19 @@ def main():
     args.dsa_param = ParamDiffAug()
     args.dsa = False if args.dsa_strategy in ['none', 'None'] else True
 
+    if args.use_wandb:
+        run = wandb.init(project=f"MIL", job_type="Instance", config=args)
+
+        cur_file = os.path.join(os.getcwd(), __file__)
+        wandb.save(cur_file)
+
     if not os.path.exists(args.data_path):
         os.mkdir(args.data_path)
 
     if not os.path.exists("result"):
         os.mkdir("result")
 
-
+    args.save_path = f'batch_size-{args.batch_real}-mean_bag_length-{args.mean_bag_length}'
     if not os.path.exists(os.path.join("result", args.save_path)):
         os.mkdir(os.path.join("result", args.save_path))
 
@@ -129,14 +138,18 @@ def main():
         # labels_all = torch.tensor(labels_all, dtype=torch.long, device=args.device)
 
 
-
         for c in range(num_classes):
             logger.info('class c = %d: %d real images'%(c, len(indices_class[c])))
 
         def get_images(c, n): # get random n images from class c
             idx_shuffle = np.random.permutation(indices_class[c])[:n]
-            return torch.cat([images_all[i] for i in idx_shuffle], dim=0).to(args.device)
-            # return torch.cat(images_all[idx_shuffle], dim=0).to(args.device)
+            # For ConvNet
+            # if args.model == 'Attention':
+            xs = [images_all[i] for i in idx_shuffle]
+            # else:
+            #     xs = [images_all[i][0] for i in idx_shuffle]
+            x = torch.cat(xs, dim=0).to(args.device)
+            return x
 
         # for ch in range(channel):
         #     print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
@@ -147,7 +160,6 @@ def main():
         image_syn = torch.rand(size=(num_classes * args.ipc, channel, im_size[0], im_size[1]), dtype=torch.float,
                                 requires_grad=True, device=args.device)
         label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
-
         if args.init == 'real':
             logger.info('initialize synthetic data from random real images')
             for c in range(num_classes):
@@ -162,49 +174,10 @@ def main():
         logger.info('%s training begins'%get_time())
 
         for it in range(args.Iteration+1):
-
-            # ''' Evaluate synthetic data '''
-            # if it in eval_it_pool:
-            #     for model_eval in model_eval_pool:
-            #         logger.info('-------------------------\nEvaluation\nmodel_train = %s, model_eval = %s, iteration = %d'%(args.model, model_eval, it))
-            #
-            #         logger.info(f'DSA augmentation strategy: {args.dsa_strategy}\n')
-            #         logger.info(f'DSA augmentation parameters: {args.dsa_param.__dict__}\n')
-            #
-            #         accs = []
-            #         for it_eval in range(args.num_eval):
-            #             # TODO: use attention network
-            #
-            #             net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device) # get a random model
-            #             image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach()) # avoid any unaware modification
-            #             _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args)
-            #             accs.append(acc_test)
-            #         logger.info('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------'%(len(accs), model_eval, np.mean(accs), np.std(accs)))
-            #
-            #         if it == args.Iteration: # record the final results
-            #             accs_all_exps[model_eval] += accs
-            #
-            #     ''' visualize and save '''
-            #     save_name = os.path.join(save_path, 'vis_mil_instance_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
-            #     image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
-            #     for ch in range(channel):
-            #         image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
-            #     image_syn_vis[image_syn_vis<0] = 0.0
-            #     image_syn_vis[image_syn_vis>1] = 1.0
-            #     save_image(image_syn_vis, save_name, nrow=args.ipc) # Trying normalize = True/False may get better visual effects.
-
-
-
-            ''' Train synthetic data '''
-            # TODO: change to MIL network
-            # net = get_network(args.model, channel, num_classes, im_size).to(args.device) # get a random model
-            # net.train()
-            # for param in list(net.parameters()):
-            #     param.requires_grad = False
-            #
-            # embed = net.module.embed if torch.cuda.device_count() > 1 else net.embed # for GPU parallel
-
-            net = get_mil_network(args.model, channel, num_classes, im_size).to(args.device)
+            # if args.model == 'Attention':
+            net = get_mil_network(args.model, channel, num_classes, im_size, args).to(args.device)
+            # else:
+            #     net = get_network(args.model, channel, num_classes, im_size, args).to(args.device)
             if args.use_pretrain:
                 net.load_state_dict(torch.load(os.path.join(args.use_pretrain, "model.pth")))
 
@@ -233,13 +206,13 @@ def main():
                     output_real = embed(img_real).detach()
                     output_syn = embed(img_syn)
 
-                    clip_loss = torch.square(img_syn - torch.clip(img_syn, 0, 1)).detach()
-                    syn_max, syn_min = torch.max(img_syn), torch.min(img_syn)
-                    scale = syn_max - syn_min
-                    scale_loss = torch.square((img_syn - syn_min)/scale - img_syn).detach()
+                    # clip_loss = torch.square(img_syn - torch.clip(img_syn, 0, 1)).detach()
+                    # syn_max, syn_min = torch.max(img_syn), torch.min(img_syn)
+                    # scale = syn_max - syn_min
+                    # scale_loss = torch.square((img_syn - syn_min)/scale - img_syn).detach()
+                    # loss += torch.sum((torch.mean(output_real, dim=0) - torch.mean(output_syn, dim=0))**2)
+                    # loss += args.clip_alpha *torch.sum(clip_loss) + args.scale_alpha * torch.sum(scale_loss)
                     loss += torch.sum((torch.mean(output_real, dim=0) - torch.mean(output_syn, dim=0))**2)
-                    loss += args.clip_alpha *torch.sum(clip_loss) + args.scale_alpha * torch.sum(scale_loss)
-
             else: # for ConvNetBN
                 images_real_all = []
                 images_syn_all = []
@@ -255,6 +228,7 @@ def main():
 
                     images_real_all.append(img_real)
                     images_syn_all.append(img_syn)
+
 
                 images_real_all = torch.cat(images_real_all, dim=0)
                 images_syn_all = torch.cat(images_syn_all, dim=0)
@@ -281,6 +255,8 @@ def main():
 
             if it%10 == 0:
                 logger.info('%s iter = %05d, loss = %.4f' % (get_time(), it, loss_avg))
+                if args.use_wandb:
+                    wandb.log({f'Loss': loss_avg}, step=it)
 
             if it == args.Iteration: # only record the final results
                 data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
@@ -304,9 +280,14 @@ def main():
                             label_syn.detach())  # avoid any unaware modification
                         _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader,
                                                                  args)
+
                         accs.append(acc_test)
                     logger.info('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------' % (
                     len(accs), model_eval, np.mean(accs), np.std(accs)))
+
+                    if args.use_wandb:
+                        wandb.log({f'Accuracy/{model_eval}': np.mean(accs)}, step=it)
+                        wandb.log({f'Std/{model_eval}': np.std(accs)}, step=it)
 
                     if it == args.Iteration:  # record the final results
                         accs_all_exps[model_eval] += accs
@@ -321,6 +302,8 @@ def main():
                 image_syn_vis[image_syn_vis > 1] = 1.0
                 save_image(image_syn_vis, save_name,
                            nrow=args.ipc)  # Trying normalize = True/False may get better visual effects.
+                grid = torchvision.utils.make_grid(image_syn_vis, nrow=args.ipc, normalize=True, scale_each=True)
+                wandb.log({"Synthetic_Images": wandb.Image(torch.nan_to_num(grid.detach().cpu()))}, step=it)
 
     logger.info('\n==================== Final Results ====================\n')
     for key in model_eval_pool:
@@ -331,5 +314,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
